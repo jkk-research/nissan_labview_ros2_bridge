@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>nissan_bridge_gui</name>
+  <version>0.0.0</version>
+  <description>Python test GUI package for Nissan bridge validation.</description>
+  <maintainer email="devnull@example.com">nissan_bridge team</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_python</buildtool_depend>
+
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>nissan_bridge_msgs</exec_depend>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
