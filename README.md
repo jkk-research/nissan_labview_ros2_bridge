@@ -38,3 +38,22 @@ source ~/ros2_ws/install/setup.bash
 - `nissan_bridge_msgs`: ROS 2 message definitions for the bridge
 - `nissan_bridge`: C++ bridge node
 - `nissan_bridge_gui`: Python test GUI node
+
+
+## Usage
+
+```bash
+ros2 run nissan_bridge_gui battery_viewer
+```
+
+```bash
+ros2 topic type /battery/voltage
+```
+
+```
+nissan_bridge_msgs/msg/Float64Stamped
+```
+
+```bash
+ros2 topic pub -r 10 /battery/temperature nissan_bridge_msgs/msg/Float64Stamped "{header: auto, data: 48.82}"
+```

@@ -19,6 +19,7 @@ setup(
     entry_points={
         'console_scripts': [
             'nissan_bridge_gui = nissan_bridge_gui.gui_node:main',
+            'battery_viewer = nissan_bridge_gui.battery_viewer:main',
         ],
     },
 )
