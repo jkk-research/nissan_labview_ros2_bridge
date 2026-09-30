@@ -1,9 +1,10 @@
 // Dummy UDP receiver node.
 //
-// Listens for UDP packets sent from a LabVIEW target (default 10.0.0.3:58432)
+// Listens for UDP packets sent from a LabVIEW target (default 192.172.11.22:63333)
 // on a local UDP port (default 58432). Each packet is expected to contain a
-// flattened array of 54 doubles (64-bit IEEE-754, 432 bytes total). Elements
-// 32, 33, 34 and 35 (0-indexed) are printed to the terminal on every packet.
+// flattened array of 8 single-precision floats (32-bit IEEE-754, 32 bytes total).
+// Elements 0, 1, 2, 3, 4 and 5 (0-indexed) are printed to the terminal on every
+// packet.
 //
 // This node exists purely to validate the wire format coming from LabVIEW; it
 // does not publish anything onto the ROS graph.
@@ -26,21 +27,21 @@
 
 namespace
 {
-constexpr std::size_t kArraySize = 54;
-constexpr std::size_t kPacketBytes = kArraySize * sizeof(double);
+constexpr std::size_t kArraySize = 8;
+constexpr std::size_t kPacketBytes = kArraySize * sizeof(float);
 
 // LabVIEW's "Flatten To String" defaults to big-endian (network) byte order,
-// while x86/x64 Linux is little-endian, so the bytes of every double need to
-// be swapped before they can be reinterpreted. This assumes a little-endian
-// host, which holds for the platforms this bridge targets.
-double bytesToDouble(const uint8_t * bytes, bool big_endian_source)
+// while x86/x64 Linux is little-endian, so the bytes of every float need to be
+// swapped before they can be reinterpreted. This assumes a little-endian host,
+// which holds for the platforms this bridge targets.
+float bytesToFloat(const uint8_t * bytes, bool big_endian_source)
 {
-  uint64_t raw;
+  uint32_t raw;
   std::memcpy(&raw, bytes, sizeof(raw));
   if (big_endian_source) {
-    raw = __builtin_bswap64(raw);
+    raw = __builtin_bswap32(raw);
   }
-  double value;
+  float value;
   std::memcpy(&value, &raw, sizeof(value));
   return value;
 }
@@ -53,7 +54,8 @@ public:
   : Node("udp_dummy_node")
   {
     listen_port_ = declare_parameter<int>("listen_port", 58432);
-    source_ip_ = declare_parameter<std::string>("source_ip", "10.0.0.3");
+    source_ip_ = declare_parameter<std::string>("source_ip", "192.172.11.22");
+    source_port_ = declare_parameter<int>("source_port", 63333);
     big_endian_source_ = declare_parameter<bool>("big_endian_source", true);
 
     socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
@@ -86,8 +88,8 @@ public:
 
     RCLCPP_INFO(
       get_logger(),
-      "udp_dummy_node listening on 0.0.0.0:%d, expecting %zu-double packets from %s",
-      listen_port_, kArraySize, source_ip_.c_str());
+      "udp_dummy_node listening on 0.0.0.0:%d, expecting %zu-float packets from %s:%d",
+      listen_port_, kArraySize, source_ip_.c_str(), source_port_);
 
     running_ = true;
     recv_thread_ = std::thread(&UdpDummyNode::receiveLoop, this);
@@ -129,10 +131,11 @@ private:
       inet_ntop(AF_INET, &sender_addr.sin_addr, sender_ip, sizeof(sender_ip));
       const uint16_t sender_port = ntohs(sender_addr.sin_port);
 
-      if (source_ip_ != sender_ip) {
+      if (source_ip_ != sender_ip || sender_port != static_cast<uint16_t>(source_port_)) {
         RCLCPP_WARN(
-          get_logger(), "Ignoring UDP packet from unexpected source %s:%u (expected %s)",
-          sender_ip, sender_port, source_ip_.c_str());
+          get_logger(),
+          "Ignoring UDP packet from unexpected source %s:%u (expected %s:%d)",
+          sender_ip, sender_port, source_ip_.c_str(), source_port_);
         continue;
       }
 
@@ -140,24 +143,33 @@ private:
         RCLCPP_WARN(
           get_logger(),
           "Ignoring packet from %s:%u with unexpected size: got %zd bytes, expected %zu "
-          "bytes (%zu doubles)",
+          "bytes (%zu floats)",
           sender_ip, sender_port, received, kPacketBytes, kArraySize);
         continue;
       }
 
-      std::array<double, kArraySize> values{};
+      std::array<float, kArraySize> values{};
       for (std::size_t i = 0; i < kArraySize; ++i) {
-        values[i] = bytesToDouble(buffer.data() + i * sizeof(double), big_endian_source_);
+        values[i] = bytesToFloat(buffer.data() + i * sizeof(float), big_endian_source_);
       }
 
       RCLCPP_INFO(
-        get_logger(), "[%s:%u] [32]=%.6f [33]=%.6f [34]=%.6f [35]=%.6f",
-        sender_ip, sender_port, values[32], values[33], values[34], values[35]);
+        get_logger(),
+        "[%s:%u] [0]=%.6f [1]=%.6f [2]=%.6f [3]=%.6f [4]=%.6f [5]=%.6f",
+        sender_ip,
+        sender_port,
+        values[0],
+        values[1],
+        values[2],
+        values[3],
+        values[4],
+        values[5]);
     }
   }
 
   int listen_port_{58432};
-  std::string source_ip_{"10.0.0.3"};
+  std::string source_ip_{"192.172.11.22"};
+  int source_port_{63333};
   bool big_endian_source_{true};
   int socket_fd_{-1};
   std::atomic<bool> running_{false};
