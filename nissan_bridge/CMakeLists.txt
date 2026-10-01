@@ -8,6 +8,7 @@ find_package(Threads REQUIRED)
 
 add_executable(nissan_bridge_node src/nissan_bridge_node.cpp)
 ament_target_dependencies(nissan_bridge_node rclcpp nissan_bridge_msgs)
+target_link_libraries(nissan_bridge_node Threads::Threads)
 
 add_executable(udp_dummy_node src/udp_dummy_node.cpp)
 ament_target_dependencies(udp_dummy_node rclcpp)

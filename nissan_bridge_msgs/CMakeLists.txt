@@ -6,7 +6,10 @@ find_package(rosidl_default_generators REQUIRED)
 find_package(std_msgs REQUIRED)
 
 rosidl_generate_interfaces(${PROJECT_NAME}
-  "msg/BridgeStatus.msg"
+  "msg/EvBatteryPower.msg"
+  "msg/EvThermal.msg"
+  "msg/EvBatteryHistory.msg"
+  "msg/VehicleState.msg"
   "msg/Float64Stamped.msg"
   DEPENDENCIES std_msgs
 )
