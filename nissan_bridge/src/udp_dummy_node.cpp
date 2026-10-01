@@ -1,7 +1,7 @@
 // Dummy UDP receiver node.
 //
-// Listens for UDP packets sent from a LabVIEW target (default 10.0.0.3:58432)
-// on a local UDP port (default 58432). Each packet contains one flattened
+// Listens for UDP packets sent from a LabVIEW target (default 10.0.0.3:63333)
+// on a local UDP port (default 63333). Each packet contains one flattened
 // cluster of 32-bit floating-point values. Element [0] identifies the cluster.
 //
 // This node exists purely to validate the wire format coming from LabVIEW; it
@@ -52,7 +52,7 @@ public:
   UdpDummyNode()
   : Node("udp_dummy_node")
   {
-    listen_port_ = declare_parameter<int>("listen_port", 58432);
+    listen_port_ = declare_parameter<int>("listen_port", 63333);
     source_ip_ = declare_parameter<std::string>("source_ip", "192.162.11.22");
     big_endian_source_ = declare_parameter<bool>("big_endian_source", true);
 
@@ -160,7 +160,7 @@ private:
     }
   }
 
-  int listen_port_{58432};
+  int listen_port_{63333};
   std::string source_ip_{"192.162.11.22"};
   bool big_endian_source_{true};
   int socket_fd_{-1};
