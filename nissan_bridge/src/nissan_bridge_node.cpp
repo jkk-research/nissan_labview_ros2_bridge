@@ -53,6 +53,13 @@ bool toByte(float value, uint8_t & result)
   result = static_cast<uint8_t>(value);
   return true;
 }
+
+constexpr double kSecondsPerTick = 1e-7;   // 100 ns
+
+double ticksToSec(float ticks)
+{
+  return static_cast<double>(ticks) * kSecondsPerTick;
+}
 }  // namespace
 
 class NissanBridgeNode : public rclcpp::Node
@@ -61,11 +68,11 @@ public:
   NissanBridgeNode()
   : Node("nissan_bridge_node")
   {
-    listen_port_ = declare_parameter<int>("listen_port", 58432);
+    listen_port_ = declare_parameter<int>("listen_port", 63333);
     source_ip_ = declare_parameter<std::string>("source_ip", "192.162.11.22");
     big_endian_source_ = declare_parameter<bool>("big_endian_source", true);
     time_diff_threshold_sec_ = declare_parameter<double>("time_diff_threshold_sec", 0.5);
-    debug_ = declare_parameter<bool>("debug", true);
+    debug_ = declare_parameter<bool>("debug", false);
 
     battery_power_publisher_ = create_publisher<nissan_bridge_msgs::msg::EvBatteryPower>(
       "ev/battery_power", 10);
@@ -181,8 +188,10 @@ private:
         continue;
       }
 
+      // Cluster 4: values[1] is RT_Time (absolute), the first CAN tick field is values[3]
+      const std::size_t tick_index = (cluster_id == 4.0F) ? 3 : 1;
       const double time_diff_sec = checkTimeDifference(
-        static_cast<std::size_t>(cluster_id) - 1, values[1]);
+        static_cast<std::size_t>(cluster_id) - 1, values[tick_index]);
       if (debug_) {
         std::ostringstream packet_log;
         packet_log << std::fixed << std::setprecision(6)
@@ -248,18 +257,18 @@ private:
         "Cluster %zu ROS/CAN elapsed-time difference is %.6f sec (threshold %.3f sec)",
         cluster_index + 1, diff_sec, time_diff_threshold_sec_);
     }
-      return diff_sec;
+    return diff_sec;
   }
 
   void publishBatteryPower(const std::vector<float> & values)
   {
     nissan_bridge_msgs::msg::EvBatteryPower message;
     message.header.stamp = now();
-    message.ev_1db_timestamp = values[1];
+    message.ev_1db_timestamp = ticksToSec(values[1]);
     message.ev_1db_lb_voltage = values[2];
     message.ev_1db_lb_current = values[3];
     message.ev_1db_lb_usable_soc = values[4];
-    message.ev_1dc_timestamp = values[5];
+    message.ev_1dc_timestamp = ticksToSec(values[5]);
     message.ev_1dc_lb_charge_power_limit = values[6];
     message.ev_1dc_lb_discharge_power_limit = values[7];
     battery_power_publisher_->publish(message);
@@ -269,26 +278,26 @@ private:
   {
     nissan_bridge_msgs::msg::EvThermal message;
     message.header.stamp = now();
-    message.ev_54a_timestamp = values[1];
+    message.ev_54a_timestamp = ticksToSec(values[1]);
     message.ev_54a_ambient_temp_ac = values[2];
-    message.ev_54c_timestamp = values[3];
+    message.ev_54c_timestamp = ticksToSec(values[3]);
     message.ev_54c_ac_evaporator_temperature = values[4];
-    message.ev_54f_timestamp = values[5];
+    message.ev_54f_timestamp = ticksToSec(values[5]);
     message.ev_54f_interior_intake_temp = values[6];
-    message.ev_55a_timestamp = values[7];
+    message.ev_55a_timestamp = ticksToSec(values[7]);
     message.ev_55a_motor_temperature = values[8];
     message.ev_55a_igbt_temperature = values[9];
     message.ev_55a_igbt_driver_board_temperature = values[10];
     message.ev_55a_inverter_com_board_temp = values[11];
-    message.ev_55b_timestamp = values[12];
+    message.ev_55b_timestamp = ticksToSec(values[12]);
     message.ev_55b_lb_soc = values[13];
-    message.ev_5bc_timestamp = values[14];
+    message.ev_5bc_timestamp = ticksToSec(values[14]);
     message.ev_5bc_lb_capacity_deterioration_rate = values[15];
     message.ev_5bc_lb_remain_capacity_gids = values[16];
     message.ev_5bc_lb_temperature_segment_for_dash = values[17];
-    message.car_510_timestamp = values[18];
+    message.car_510_timestamp = ticksToSec(values[18]);
     message.car_510_outside_ambient_temperature = values[19];
-    message.car_5b3_timestamp = values[20];
+    message.car_5b3_timestamp = ticksToSec(values[20]);
     message.car_5b3_battery_state_of_health = values[21];
     message.car_5b3_battery_gids = values[22];
     message.car_5b3_battery_pack_temperature = values[23];
@@ -299,9 +308,9 @@ private:
   {
     nissan_bridge_msgs::msg::EvBatteryHistory message;
     message.header.stamp = now();
-    message.ev_59e_timestamp = values[1];
+    message.ev_59e_timestamp = ticksToSec(values[1]);
     message.ev_59e_lb_full_capacity_for_qc = values[2];
-    message.ev_5c0_timestamp = values[3];
+    message.ev_5c0_timestamp = ticksToSec(values[3]);
     message.ev_5c0_degr_int_res_coeff_min = values[4];
     message.ev_5c0_degr_int_res_coeff_max = values[5];
     message.ev_5c0_degr_int_res_coeff_avg = values[6];
@@ -321,11 +330,11 @@ private:
   {
     nissan_bridge_msgs::msg::VehicleState message;
     message.header.stamp = now();
-    message.rt_time = values[1];
-    message.aut_time = values[2];
-    message.car_284_timestamp = values[3];
+    message.rt_time = values[1];    // not CAN ticks
+    message.aut_time = values[2];   // not CAN ticks
+    message.car_284_timestamp = ticksToSec(values[3]);
     message.car_284_vehicle_speed_from_abs = values[4];
-    message.car_002_timestamp = values[5];
+    message.car_002_timestamp = ticksToSec(values[5]);
     message.car_002_steering_angle = values[6];
     message.accel_pedal_state = values[7];
     message.brake_pedal_state = values[8];
@@ -335,11 +344,11 @@ private:
       RCLCPP_WARN(get_logger(), "Ignoring vehicle state packet with invalid byte field");
       return;
     }
-    message.car_358_timestamp = values[10];
+    message.car_358_timestamp = ticksToSec(values[10]);
     vehicle_state_publisher_->publish(message);
   }
 
-  int listen_port_{58432};
+  int listen_port_{63333};
   std::string source_ip_{"192.162.11.22"};
   bool big_endian_source_{true};
   double time_diff_threshold_sec_{0.5};
