@@ -18,6 +18,7 @@ from tkinter import font as tkfont
 import rclpy
 from rclpy.node import Node
 from nissan_bridge_msgs.msg import Float64Stamped
+from sensor_msgs.msg import Temperature
 
 # ── Palette ───────────────────────────────────────────────────────────────────
 BG     = "#0d0f14"
@@ -31,15 +32,16 @@ BAD    = "#ff1744"
 TEXT   = "#e8eaf0"
 MUTED  = "#4a5068"
 
-# (topic, key, unit, color, formatter)
+# (topic, key, unit, color, formatter, message type)
 TOPICS = [
-    ("/battery/soc",              "soc",         "%",  GOOD,   lambda v: f"{v*100:.2f}"),
-    ("/battery/voltage",          "voltage",     "V",  ACCENT, lambda v: f"{v:.3f}"),
-    ("/battery/temperature",      "temperature", "°C", WARN,   lambda v: f"{v:.2f}"),
-    ("/battery/soh",              "soh",         "%",  ORANGE, lambda v: f"{v*100:.2f}"),
-    ("/battery/energy_consumed",  "energy",      "Wh", TEXT,   lambda v: f"{v:.2f}"),
-    ("/battery/max_load_power",   "max_load",    "W",  MUTED,  lambda v: f"{v:.0f}"),
-    ("/battery/max_charge_power", "max_charge",  "W",  MUTED,  lambda v: f"{v:.0f}"),
+    ("/battery/soc",              "soc",         "%",  GOOD,   lambda v: f"{v*100:.2f}", Float64Stamped),
+    ("/battery/voltage",          "voltage",     "V",  ACCENT, lambda v: f"{v:.3f}",     Float64Stamped),
+    ("/battery/current",          "current",     "A",  ACCENT, lambda v: f"{v:.2f}",     Float64Stamped),
+    ("/battery/temperature",      "temperature", "°C", WARN,   lambda v: f"{v:.2f}",     Temperature),
+    ("/battery/soh",              "soh",         "%",  ORANGE, lambda v: f"{v*100:.2f}", Float64Stamped),
+    ("/battery/energy_consumed",  "energy",      "Wh", TEXT,   lambda v: f"{v:.2f}",     Float64Stamped),
+    ("/battery/max_load_power",   "max_load",    "W",  MUTED,  lambda v: f"{v:.0f}",     Float64Stamped),
+    ("/battery/max_charge_power", "max_charge",  "W",  MUTED,  lambda v: f"{v:.0f}",     Float64Stamped),
 ]
 
 # (label, key, unit, color, lo, hi, scale) — scale converts raw value to shown value
@@ -58,10 +60,11 @@ class BatterySubscriber(Node):
         super().__init__("battery_viewer_gui")
         self.data = {}
         self.last_update = {}
-        for topic, key, *_ in TOPICS:
+        for topic, key, *_, msg_type in TOPICS:
+            field = "temperature" if msg_type is Temperature else "data"
             self.create_subscription(
-                Float64Stamped, topic,
-                lambda msg, k=key: self._recv(k, msg.data), 10)
+                msg_type, topic,
+                lambda msg, k=key, f=field: self._recv(k, getattr(msg, f)), 10)
 
     def _recv(self, key, value):
         self.data[key] = value
@@ -82,7 +85,7 @@ class BatteryViewer:
 
         root.title("Battery Viewer")
         root.configure(bg=BG)
-        root.geometry("760x620")
+        root.geometry("760x650")
 
         self.fT = tkfont.Font(family="Courier", size=10, weight="bold")
         self.fV = tkfont.Font(family="Courier", size=24, weight="bold")
@@ -128,7 +131,7 @@ class BatteryViewer:
         self._section("SUBSCRIBED TOPICS")
         tf = tk.Frame(self.root, bg=BG)
         tf.pack(fill="x", padx=14, pady=(4, 0))
-        for topic, key, unit, color, fmt in TOPICS:
+        for topic, key, unit, color, fmt, _ in TOPICS:
             row = tk.Frame(tf, bg=PANEL, highlightthickness=1, highlightbackground=BORDER)
             row.pack(fill="x", pady=1)
             tk.Label(row, text=topic, font=self.fS, fg=MUTED, bg=PANEL,

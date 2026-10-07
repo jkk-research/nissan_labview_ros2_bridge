@@ -8,6 +8,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cerrno>
 #include <cmath>
 #include <cstdint>
@@ -20,11 +21,14 @@
 #include <thread>
 #include <vector>
 
+#include "geometry_msgs/msg/twist_stamped.hpp"
 #include "nissan_bridge_msgs/msg/ev_battery_history.hpp"
 #include "nissan_bridge_msgs/msg/ev_battery_power.hpp"
 #include "nissan_bridge_msgs/msg/ev_thermal.hpp"
+#include "nissan_bridge_msgs/msg/float64_stamped.hpp"
 #include "nissan_bridge_msgs/msg/vehicle_state.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "sensor_msgs/msg/temperature.hpp"
 
 namespace
 {
@@ -32,6 +36,10 @@ constexpr std::size_t kValueBytes = sizeof(float);
 constexpr std::array<std::size_t, 4> kClusterValueCounts{8, 24, 16, 12};
 constexpr int64_t kNanosecondsPerSecond = 1000000000LL;
 constexpr int64_t kNanosecondsPerTick = 100LL;
+constexpr double kWattsPerKilowatt = 1000.0;
+constexpr double kSecondsPerHour = 3600.0;
+// Longer gaps between cluster 1 packets are not integrated into battery/energy_consumed
+constexpr double kMaxEnergyIntegrationGapSec = 1.0;
 
 float bytesToFloat(const uint8_t * bytes, bool big_endian_source)
 {
@@ -73,6 +81,21 @@ public:
     big_endian_source_ = declare_parameter<bool>("big_endian_source", true);
     time_diff_threshold_sec_ = declare_parameter<double>("time_diff_threshold_sec", 0.5);
     debug_ = declare_parameter<bool>("debug", false);
+    // battery/current is published with + = discharge; -1.0 flips the LB_Current sign
+    battery_current_sign_ = declare_parameter<double>("battery_current_sign", -1.0);
+    // "pack" = CAR 0x5B3 BatteryPackTemperature, "hist_avg" = EV 0x5C0 HistData_Temperature_AVG
+    battery_temperature_source_ = declare_parameter<std::string>(
+      "battery_temperature_source", "pack");
+    if (battery_temperature_source_ != "pack" && battery_temperature_source_ != "hist_avg") {
+      throw std::runtime_error(
+              "battery_temperature_source must be \"pack\" or \"hist_avg\", got \"" +
+              battery_temperature_source_ + "\"");
+    }
+    // VehicleSpeedFromABS -> m/s (default assumes km/h)
+    speed_scale_ = declare_parameter<double>("speed_scale", 1.0 / 3.6);
+    // SteeringAngle -> vehicle_status angular.z
+    steering_scale_ = declare_parameter<double>("steering_scale", 1.0);
+    frame_id_ = declare_parameter<std::string>("frame_id", "base_link");
 
     battery_power_publisher_ = create_publisher<nissan_bridge_msgs::msg::EvBatteryPower>(
       "ev/battery_power", 10);
@@ -81,6 +104,22 @@ public:
       "ev/battery_history", 10);
     vehicle_state_publisher_ = create_publisher<nissan_bridge_msgs::msg::VehicleState>(
       "vehicle/state", 10);
+
+    soc_publisher_ = create_publisher<Float64Stamped>("battery/soc", 10);
+    voltage_publisher_ = create_publisher<Float64Stamped>("battery/voltage", 10);
+    current_publisher_ = create_publisher<Float64Stamped>("battery/current", 10);
+    battery_temperature_publisher_ = create_publisher<sensor_msgs::msg::Temperature>(
+      "battery/temperature", 10);
+    soh_publisher_ = create_publisher<Float64Stamped>("battery/soh", 10);
+    energy_consumed_publisher_ = create_publisher<Float64Stamped>("battery/energy_consumed", 10);
+    max_load_power_publisher_ = create_publisher<Float64Stamped>("battery/max_load_power", 10);
+    max_charge_power_publisher_ = create_publisher<Float64Stamped>(
+      "battery/max_charge_power", 10);
+    p_mech_publisher_ = create_publisher<Float64Stamped>("ev/powertrain/p_mech", 10);
+    vehicle_status_publisher_ = create_publisher<geometry_msgs::msg::TwistStamped>(
+      "vehicle_status", 10);
+    ambient_temperature_publisher_ = create_publisher<sensor_msgs::msg::Temperature>(
+      "vehicle/ambient_temperature", 10);
 
     socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (socket_fd_ < 0) {
@@ -128,6 +167,8 @@ public:
   }
 
 private:
+  using Float64Stamped = nissan_bridge_msgs::msg::Float64Stamped;
+
   void receiveLoop()
   {
     std::array<uint8_t, 65536> buffer{};
@@ -272,6 +313,31 @@ private:
     message.ev_1dc_lb_charge_power_limit = values[6];
     message.ev_1dc_lb_discharge_power_limit = values[7];
     battery_power_publisher_->publish(message);
+
+    const double voltage = values[2];
+    const double current = battery_current_sign_ * values[3];   // + = discharge
+    const double power = voltage * current;                     // W
+    publishFloat(voltage_publisher_, message.header.stamp, voltage);
+    publishFloat(current_publisher_, message.header.stamp, current);
+    publishFloat(
+      max_charge_power_publisher_, message.header.stamp, values[6] * kWattsPerKilowatt);
+    publishFloat(max_load_power_publisher_, message.header.stamp, values[7] * kWattsPerKilowatt);
+    // No motor power signal in the UDP clusters: battery terminal power is used instead
+    publishFloat(p_mech_publisher_, message.header.stamp, power);
+
+    const auto steady_now = std::chrono::steady_clock::now();
+    if (std::isfinite(power)) {
+      if (energy_integration_started_) {
+        const double dt_sec = std::chrono::duration<double>(steady_now - last_power_time_).count();
+        if (dt_sec <= kMaxEnergyIntegrationGapSec) {
+          energy_consumed_wh_ += 0.5 * (power + last_power_w_) * dt_sec / kSecondsPerHour;
+        }
+      }
+      energy_integration_started_ = true;
+      last_power_w_ = power;
+      last_power_time_ = steady_now;
+    }
+    publishFloat(energy_consumed_publisher_, message.header.stamp, energy_consumed_wh_);
   }
 
   void publishThermal(const std::vector<float> & values)
@@ -302,6 +368,13 @@ private:
     message.car_5b3_battery_gids = values[22];
     message.car_5b3_battery_pack_temperature = values[23];
     thermal_publisher_->publish(message);
+
+    publishFloat(soc_publisher_, message.header.stamp, values[13] / 100.0);
+    publishFloat(soh_publisher_, message.header.stamp, values[21] / 100.0);
+    publishTemperature(ambient_temperature_publisher_, message.header.stamp, values[19]);
+    if (battery_temperature_source_ == "pack") {
+      publishTemperature(battery_temperature_publisher_, message.header.stamp, values[23]);
+    }
   }
 
   void publishBatteryHistory(const std::vector<float> & values)
@@ -324,6 +397,10 @@ private:
     message.ev_5c0_temp_wakeup_phase_max = values[14];
     message.ev_5c0_temp_wakeup_phase_avg = values[15];
     battery_history_publisher_->publish(message);
+
+    if (battery_temperature_source_ == "hist_avg") {
+      publishTemperature(battery_temperature_publisher_, message.header.stamp, values[12]);
+    }
   }
 
   void publishVehicleState(const std::vector<float> & values)
@@ -346,6 +423,33 @@ private:
     }
     message.car_358_timestamp = ticksToSec(values[10]);
     vehicle_state_publisher_->publish(message);
+
+    geometry_msgs::msg::TwistStamped status;
+    status.header.stamp = message.header.stamp;
+    status.header.frame_id = frame_id_;
+    status.twist.linear.x = speed_scale_ * values[4];
+    status.twist.angular.z = steering_scale_ * values[6];
+    vehicle_status_publisher_->publish(status);
+  }
+
+  void publishFloat(
+    const rclcpp::Publisher<Float64Stamped>::SharedPtr & publisher,
+    const builtin_interfaces::msg::Time & stamp, double value)
+  {
+    Float64Stamped message;
+    message.header.stamp = stamp;
+    message.data = value;
+    publisher->publish(message);
+  }
+
+  void publishTemperature(
+    const rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr & publisher,
+    const builtin_interfaces::msg::Time & stamp, double celsius)
+  {
+    sensor_msgs::msg::Temperature message;
+    message.header.stamp = stamp;
+    message.temperature = celsius;
+    publisher->publish(message);
   }
 
   int listen_port_{63333};
@@ -353,6 +457,15 @@ private:
   bool big_endian_source_{true};
   double time_diff_threshold_sec_{0.5};
   bool debug_{false};
+  double battery_current_sign_{-1.0};
+  std::string battery_temperature_source_{"pack"};
+  double speed_scale_{1.0 / 3.6};
+  double steering_scale_{1.0};
+  std::string frame_id_{"base_link"};
+  bool energy_integration_started_{false};
+  double energy_consumed_wh_{0.0};
+  double last_power_w_{0.0};
+  std::chrono::steady_clock::time_point last_power_time_;
   int socket_fd_{-1};
   std::atomic<bool> running_{false};
   std::thread receive_thread_;
@@ -364,6 +477,17 @@ private:
   rclcpp::Publisher<nissan_bridge_msgs::msg::EvBatteryHistory>::SharedPtr
     battery_history_publisher_;
   rclcpp::Publisher<nissan_bridge_msgs::msg::VehicleState>::SharedPtr vehicle_state_publisher_;
+  rclcpp::Publisher<Float64Stamped>::SharedPtr soc_publisher_;
+  rclcpp::Publisher<Float64Stamped>::SharedPtr voltage_publisher_;
+  rclcpp::Publisher<Float64Stamped>::SharedPtr current_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr battery_temperature_publisher_;
+  rclcpp::Publisher<Float64Stamped>::SharedPtr soh_publisher_;
+  rclcpp::Publisher<Float64Stamped>::SharedPtr energy_consumed_publisher_;
+  rclcpp::Publisher<Float64Stamped>::SharedPtr max_load_power_publisher_;
+  rclcpp::Publisher<Float64Stamped>::SharedPtr max_charge_power_publisher_;
+  rclcpp::Publisher<Float64Stamped>::SharedPtr p_mech_publisher_;
+  rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vehicle_status_publisher_;
+  rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr ambient_temperature_publisher_;
 };
 
 int main(int argc, char ** argv)

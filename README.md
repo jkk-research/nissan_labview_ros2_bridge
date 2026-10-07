@@ -55,5 +55,23 @@ nissan_bridge_msgs/msg/Float64Stamped
 ```
 
 ```bash
-ros2 topic pub -r 10 /battery/temperature nissan_bridge_msgs/msg/Float64Stamped "{header: auto, data: 48.82}"
+ros2 topic pub -r 10 /battery/temperature sensor_msgs/msg/Temperature "{header: auto, temperature: 48.82}"
 ```
+
+## Published topics (`nissan_bridge_node`)
+
+| Topic | Type | Unit | Source |
+|---|---|---|---|
+| `battery/soc` | `Float64Stamped` | 0..1 | EV 0x55B `LB_SOC` / 100 |
+| `battery/voltage` | `Float64Stamped` | V | EV 0x1DB `LB_Total_Voltage` |
+| `battery/current` | `Float64Stamped` | A, + = discharge | EV 0x1DB `LB_Current` × `battery_current_sign` |
+| `battery/temperature` | `sensor_msgs/Temperature` | °C | CAR 0x5B3 `BatteryPackTemperature` or EV 0x5C0 `HistData_Temperature_AVG` (`battery_temperature_source`) |
+| `battery/soh` | `Float64Stamped` | 0..1 | CAR 0x5B3 `BatteryStateOfHealth` / 100 |
+| `battery/energy_consumed` | `Float64Stamped` | Wh | ∫V·I dt since node start |
+| `battery/max_load_power` | `Float64Stamped` | W | EV 0x1DC `LB_Discharge_Power_Limit` × 1000 |
+| `battery/max_charge_power` | `Float64Stamped` | W | EV 0x1DC `LB_Charge_Power_Limit` × 1000 |
+| `ev/powertrain/p_mech` | `Float64Stamped` | W | V·I (battery terminal power) |
+| `vehicle_status` | `geometry_msgs/TwistStamped` | m/s | `linear.x`: CAR 0x284 speed × `speed_scale`, `angular.z`: CAR 0x002 steering angle × `steering_scale` |
+| `vehicle/ambient_temperature` | `sensor_msgs/Temperature` | °C | CAR 0x510 `OutsideAmbientTemperature` |
+
+The raw per-cluster topics (`ev/battery_power`, `ev/thermal`, `ev/battery_history`, `vehicle/state`) are still published.

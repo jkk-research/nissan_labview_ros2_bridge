@@ -4,10 +4,12 @@ project(nissan_bridge)
 find_package(ament_cmake REQUIRED)
 find_package(rclcpp REQUIRED)
 find_package(nissan_bridge_msgs REQUIRED)
+find_package(geometry_msgs REQUIRED)
+find_package(sensor_msgs REQUIRED)
 find_package(Threads REQUIRED)
 
 add_executable(nissan_bridge_node src/nissan_bridge_node.cpp)
-ament_target_dependencies(nissan_bridge_node rclcpp nissan_bridge_msgs)
+ament_target_dependencies(nissan_bridge_node rclcpp nissan_bridge_msgs geometry_msgs sensor_msgs)
 target_link_libraries(nissan_bridge_node Threads::Threads)
 
 add_executable(udp_dummy_node src/udp_dummy_node.cpp)
