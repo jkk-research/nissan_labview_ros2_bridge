@@ -2,10 +2,11 @@
 """
 battery_viewer.py  —  Read-only battery topic viewer
 
-Subscribes to all /battery/* topics and displays them. Publishes nothing.
+Subscribes to all battery/* topics (relative, so a namespace can be applied) and displays them. Publishes nothing.
 
 Usage:
     ros2 run nissan_bridge_gui battery_viewer
+    ros2 run nissan_bridge_gui battery_viewer --ros-args -r __ns:=/nissan9
 
 vide coded, don't take as a reference for how to write a GUI    
 """
@@ -34,14 +35,14 @@ MUTED  = "#4a5068"
 
 # (topic, key, unit, color, formatter, message type)
 TOPICS = [
-    ("/battery/soc",              "soc",         "%",  GOOD,   lambda v: f"{v*100:.2f}", Float64Stamped),
-    ("/battery/voltage",          "voltage",     "V",  ACCENT, lambda v: f"{v:.3f}",     Float64Stamped),
-    ("/battery/current",          "current",     "A",  ACCENT, lambda v: f"{v:.2f}",     Float64Stamped),
-    ("/battery/temperature",      "temperature", "°C", WARN,   lambda v: f"{v:.2f}",     Temperature),
-    ("/battery/soh",              "soh",         "%",  ORANGE, lambda v: f"{v*100:.2f}", Float64Stamped),
-    ("/battery/energy_consumed",  "energy",      "Wh", TEXT,   lambda v: f"{v:.2f}",     Float64Stamped),
-    ("/battery/max_load_power",   "max_load",    "W",  MUTED,  lambda v: f"{v:.0f}",     Float64Stamped),
-    ("/battery/max_charge_power", "max_charge",  "W",  MUTED,  lambda v: f"{v:.0f}",     Float64Stamped),
+    ("battery/soc",              "soc",         "%",  GOOD,   lambda v: f"{v*100:.2f}", Float64Stamped),
+    ("battery/voltage",          "voltage",     "V",  ACCENT, lambda v: f"{v:.3f}",     Float64Stamped),
+    ("battery/current",          "current",     "A",  ACCENT, lambda v: f"{v:.2f}",     Float64Stamped),
+    ("battery/temperature",      "temperature", "°C", WARN,   lambda v: f"{v:.2f}",     Temperature),
+    ("battery/soh",              "soh",         "%",  ORANGE, lambda v: f"{v*100:.2f}", Float64Stamped),
+    ("battery/energy_consumed",  "energy",      "Wh", TEXT,   lambda v: f"{v:.2f}",     Float64Stamped),
+    ("battery/max_load_power",   "max_load",    "W",  MUTED,  lambda v: f"{v:.0f}",     Float64Stamped),
+    ("battery/max_charge_power", "max_charge",  "W",  MUTED,  lambda v: f"{v:.0f}",     Float64Stamped),
 ]
 
 # (label, key, unit, color, lo, hi, scale) — scale converts raw value to shown value

@@ -305,6 +305,7 @@ private:
   {
     nissan_bridge_msgs::msg::EvBatteryPower message;
     message.header.stamp = now();
+    message.header.frame_id = frame_id_;
     message.ev_1db_timestamp = ticksToSec(values[1]);
     message.ev_1db_lb_voltage = values[2];
     message.ev_1db_lb_current = values[3];
@@ -344,6 +345,7 @@ private:
   {
     nissan_bridge_msgs::msg::EvThermal message;
     message.header.stamp = now();
+    message.header.frame_id = frame_id_;
     message.ev_54a_timestamp = ticksToSec(values[1]);
     message.ev_54a_ambient_temp_ac = values[2];
     message.ev_54c_timestamp = ticksToSec(values[3]);
@@ -381,6 +383,7 @@ private:
   {
     nissan_bridge_msgs::msg::EvBatteryHistory message;
     message.header.stamp = now();
+    message.header.frame_id = frame_id_;
     message.ev_59e_timestamp = ticksToSec(values[1]);
     message.ev_59e_lb_full_capacity_for_qc = values[2];
     message.ev_5c0_timestamp = ticksToSec(values[3]);
@@ -407,6 +410,7 @@ private:
   {
     nissan_bridge_msgs::msg::VehicleState message;
     message.header.stamp = now();
+    message.header.frame_id = frame_id_;
     message.rt_time = values[1];    // not CAN ticks
     message.aut_time = values[2];   // not CAN ticks
     message.car_284_timestamp = ticksToSec(values[3]);
@@ -438,6 +442,7 @@ private:
   {
     Float64Stamped message;
     message.header.stamp = stamp;
+    message.header.frame_id = frame_id_;
     message.data = value;
     publisher->publish(message);
   }
@@ -448,6 +453,7 @@ private:
   {
     sensor_msgs::msg::Temperature message;
     message.header.stamp = stamp;
+    message.header.frame_id = frame_id_;
     message.temperature = celsius;
     publisher->publish(message);
   }

@@ -42,12 +42,24 @@ source ~/ros2_ws/install/setup.bash
 
 ## Usage
 
+Start the bridge in the `/nissan9` namespace with `nissan9/base_link` as `frame_id`:
+
 ```bash
-ros2 run nissan_bridge_gui battery_viewer
+ros2 launch nissan_bridge nissan_bridge.launch.py
+```
+
+The namespace and the frame can be overridden:
+
+```bash
+ros2 launch nissan_bridge nissan_bridge.launch.py namespace:=nissan9 frame_id:=nissan9/base_link
 ```
 
 ```bash
-ros2 topic type /battery/voltage
+ros2 run nissan_bridge_gui battery_viewer --ros-args -r __ns:=/nissan9
+```
+
+```bash
+ros2 topic type /nissan9/battery/voltage
 ```
 
 ```
@@ -55,7 +67,7 @@ nissan_bridge_msgs/msg/Float64Stamped
 ```
 
 ```bash
-ros2 topic pub -r 10 /battery/temperature sensor_msgs/msg/Temperature "{header: auto, temperature: 48.82}"
+ros2 topic pub -r 10 /nissan9/battery/temperature sensor_msgs/msg/Temperature "{header: auto, temperature: 48.82}"
 ```
 
 ## Published topics (`nissan_bridge_node`)
