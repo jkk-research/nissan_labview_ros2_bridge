@@ -35,7 +35,6 @@ namespace
 constexpr std::size_t kValueBytes = sizeof(float);
 constexpr std::array<std::size_t, 4> kClusterValueCounts{8, 24, 16, 12};
 constexpr int64_t kNanosecondsPerSecond = 1000000000LL;
-constexpr int64_t kNanosecondsPerTick = 100LL;
 constexpr double kWattsPerKilowatt = 1000.0;
 constexpr double kSecondsPerHour = 3600.0;
 // Longer gaps between cluster 1 packets are not integrated into battery/energy_consumed
@@ -229,15 +228,19 @@ private:
         continue;
       }
 
-      // Cluster 4: values[1] is RT_Time (absolute), the first CAN tick field is values[3]
-      const std::size_t tick_index = (cluster_id == 4.0F) ? 3 : 1;
-      const double time_diff_sec = checkTimeDifference(
-        static_cast<std::size_t>(cluster_id) - 1, values[tick_index]);
+      // Only cluster 4 values[1] (RT_Time, seconds) is a reliable time source; the CAN tick
+      // fields of the other clusters are not checked against ROS time
+      const bool has_rt_time = cluster_id == 4.0F;
+      const double time_diff_sec = has_rt_time ?
+        checkTimeDifference(values[1]) : std::numeric_limits<double>::quiet_NaN();
       if (debug_) {
         std::ostringstream packet_log;
         packet_log << std::fixed << std::setprecision(6)
-                   << "Cluster " << cluster_id << " (" << received << " bytes), time diff="
-                   << time_diff_sec << " sec:";
+                   << "Cluster " << cluster_id << " (" << received << " bytes)";
+        if (has_rt_time) {
+          packet_log << ", time diff=" << time_diff_sec << " sec";
+        }
+        packet_log << ":";
         for (std::size_t index = 0; index < values.size(); ++index) {
           packet_log << " [" << index << "]=" << values[index];
         }
@@ -263,40 +266,37 @@ private:
     }
   }
 
-  double checkTimeDifference(std::size_t cluster_index, float source_ticks)
+  double checkTimeDifference(float rt_time_sec)
   {
-    if (!std::isfinite(source_ticks) || source_ticks < 0.0F) {
-      RCLCPP_WARN(get_logger(), "Ignoring invalid source timestamp %.3f", source_ticks);
+    if (!std::isfinite(rt_time_sec) || rt_time_sec < 0.0F) {
+      RCLCPP_WARN(get_logger(), "Ignoring invalid RT_Time %.3f", rt_time_sec);
       return std::numeric_limits<double>::quiet_NaN();
     }
 
     const int64_t ros_time_ns = now().nanoseconds();
-    const int64_t source_ticks_ns = std::llround(
-      static_cast<double>(source_ticks) * static_cast<double>(kNanosecondsPerTick));
+    const int64_t rt_time_ns = std::llround(
+      static_cast<double>(rt_time_sec) * static_cast<double>(kNanosecondsPerSecond));
 
-    if (!time_baseline_set_[cluster_index] ||
-      source_ticks_ns < first_source_time_ns_[cluster_index])
-    {
-      time_baseline_set_[cluster_index] = true;
-      first_source_time_ns_[cluster_index] = source_ticks_ns;
-      first_ros_time_ns_[cluster_index] = ros_time_ns;
+    if (!time_baseline_set_ || rt_time_ns < first_rt_time_ns_) {
+      time_baseline_set_ = true;
+      first_rt_time_ns_ = rt_time_ns;
+      first_ros_time_ns_ = ros_time_ns;
       RCLCPP_INFO(
         get_logger(),
-        "Cluster %zu initial ROS/CAN elapsed-time diff: 0.000000 sec (baseline established)",
-        cluster_index + 1);
+        "Initial ROS/cRIO RT time diff: 0.000000 sec (baseline established)");
       return 0.0;
     }
 
-    const int64_t ros_elapsed_ns = ros_time_ns - first_ros_time_ns_[cluster_index];
-    const int64_t source_elapsed_ns = source_ticks_ns - first_source_time_ns_[cluster_index];
-    const double diff_sec = static_cast<double>(ros_elapsed_ns - source_elapsed_ns) /
+    const int64_t ros_elapsed_ns = ros_time_ns - first_ros_time_ns_;
+    const int64_t rt_elapsed_ns = rt_time_ns - first_rt_time_ns_;
+    const double diff_sec = static_cast<double>(ros_elapsed_ns - rt_elapsed_ns) /
       static_cast<double>(kNanosecondsPerSecond);
 
     if (std::fabs(diff_sec) > time_diff_threshold_sec_) {
       RCLCPP_WARN_THROTTLE(
         get_logger(), *get_clock(), 1000,
-        "Cluster %zu ROS/CAN elapsed-time difference is %.6f sec (threshold %.3f sec)",
-        cluster_index + 1, diff_sec, time_diff_threshold_sec_);
+        "ROS/RT_Time elapsed-time difference is %.6f sec (threshold %.3f sec)",
+        diff_sec, time_diff_threshold_sec_);
     }
     return diff_sec;
   }
@@ -475,9 +475,9 @@ private:
   int socket_fd_{-1};
   std::atomic<bool> running_{false};
   std::thread receive_thread_;
-  std::array<bool, 4> time_baseline_set_{};
-  std::array<int64_t, 4> first_source_time_ns_{};
-  std::array<int64_t, 4> first_ros_time_ns_{};
+  bool time_baseline_set_{false};
+  int64_t first_rt_time_ns_{0};
+  int64_t first_ros_time_ns_{0};
   rclcpp::Publisher<nissan_bridge_msgs::msg::EvBatteryPower>::SharedPtr battery_power_publisher_;
   rclcpp::Publisher<nissan_bridge_msgs::msg::EvThermal>::SharedPtr thermal_publisher_;
   rclcpp::Publisher<nissan_bridge_msgs::msg::EvBatteryHistory>::SharedPtr
