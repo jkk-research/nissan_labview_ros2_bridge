@@ -35,7 +35,6 @@ namespace
 constexpr std::size_t kValueBytes = sizeof(float);
 constexpr std::array<std::size_t, 4> kClusterValueCounts{8, 24, 16, 12};
 constexpr int64_t kNanosecondsPerSecond = 1000000000LL;
-constexpr double kWattsPerKilowatt = 1000.0;
 constexpr double kSecondsPerHour = 3600.0;
 // Longer gaps between cluster 1 packets are not integrated into battery/energy_consumed
 constexpr double kMaxEnergyIntegrationGapSec = 1.0;
@@ -80,7 +79,7 @@ public:
     big_endian_source_ = declare_parameter<bool>("big_endian_source", true);
     time_diff_threshold_sec_ = declare_parameter<double>("time_diff_threshold_sec", 0.5);
     debug_ = declare_parameter<bool>("debug", false);
-    // battery/current is published with + = discharge; -1.0 flips the LB_Current sign
+    // Sign applied to LB_Current for p_mech/energy_consumed only (+ = discharge)
     battery_current_sign_ = declare_parameter<double>("battery_current_sign", -1.0);
     // "pack" = CAR 0x5B3 BatteryPackTemperature, "hist_avg" = EV 0x5C0 HistData_Temperature_AVG
     battery_temperature_source_ = declare_parameter<std::string>(
@@ -90,10 +89,6 @@ public:
               "battery_temperature_source must be \"pack\" or \"hist_avg\", got \"" +
               battery_temperature_source_ + "\"");
     }
-    // VehicleSpeedFromABS -> m/s (default assumes km/h)
-    speed_scale_ = declare_parameter<double>("speed_scale", 1.0 / 3.6);
-    // SteeringAngle -> vehicle_status angular.z
-    steering_scale_ = declare_parameter<double>("steering_scale", 1.0);
     frame_id_ = declare_parameter<std::string>("frame_id", "base_link");
 
     battery_power_publisher_ = create_publisher<nissan_bridge_msgs::msg::EvBatteryPower>(
@@ -315,14 +310,12 @@ private:
     message.ev_1dc_lb_discharge_power_limit = values[7];
     battery_power_publisher_->publish(message);
 
-    const double voltage = values[2];
-    const double current = battery_current_sign_ * values[3];   // + = discharge
-    const double power = voltage * current;                     // W
-    publishFloat(voltage_publisher_, message.header.stamp, voltage);
-    publishFloat(current_publisher_, message.header.stamp, current);
-    publishFloat(
-      max_charge_power_publisher_, message.header.stamp, values[6] * kWattsPerKilowatt);
-    publishFloat(max_load_power_publisher_, message.header.stamp, values[7] * kWattsPerKilowatt);
+    publishFloat(voltage_publisher_, message.header.stamp, values[2]);
+    publishFloat(current_publisher_, message.header.stamp, values[3]);
+    publishFloat(max_charge_power_publisher_, message.header.stamp, values[6]);
+    publishFloat(max_load_power_publisher_, message.header.stamp, values[7]);
+
+    const double power = values[2] * battery_current_sign_ * values[3];   // W, + = discharge
     // No motor power signal in the UDP clusters: battery terminal power is used instead
     publishFloat(p_mech_publisher_, message.header.stamp, power);
 
@@ -371,8 +364,8 @@ private:
     message.car_5b3_battery_pack_temperature = values[23];
     thermal_publisher_->publish(message);
 
-    publishFloat(soc_publisher_, message.header.stamp, values[13] / 100.0);
-    publishFloat(soh_publisher_, message.header.stamp, values[21] / 100.0);
+    publishFloat(soc_publisher_, message.header.stamp, values[13]);
+    publishFloat(soh_publisher_, message.header.stamp, values[21]);
     publishTemperature(ambient_temperature_publisher_, message.header.stamp, values[19]);
     if (battery_temperature_source_ == "pack") {
       publishTemperature(battery_temperature_publisher_, message.header.stamp, values[23]);
@@ -431,8 +424,8 @@ private:
     geometry_msgs::msg::TwistStamped status;
     status.header.stamp = message.header.stamp;
     status.header.frame_id = frame_id_;
-    status.twist.linear.x = speed_scale_ * values[4];
-    status.twist.angular.z = steering_scale_ * values[6];
+    status.twist.linear.x = values[4];
+    status.twist.angular.z = values[6];
     vehicle_status_publisher_->publish(status);
   }
 
@@ -465,8 +458,6 @@ private:
   bool debug_{false};
   double battery_current_sign_{-1.0};
   std::string battery_temperature_source_{"pack"};
-  double speed_scale_{1.0 / 3.6};
-  double steering_scale_{1.0};
   std::string frame_id_{"base_link"};
   bool energy_integration_started_{false};
   double energy_consumed_wh_{0.0};

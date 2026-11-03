@@ -35,22 +35,22 @@ MUTED  = "#4a5068"
 
 # (topic, key, unit, color, formatter, message type)
 TOPICS = [
-    ("battery/soc",              "soc",         "%",  GOOD,   lambda v: f"{v*100:.2f}", Float64Stamped),
+    ("battery/soc",              "soc",         "%",  GOOD,   lambda v: f"{v:.2f}",     Float64Stamped),
     ("battery/voltage",          "voltage",     "V",  ACCENT, lambda v: f"{v:.3f}",     Float64Stamped),
     ("battery/current",          "current",     "A",  ACCENT, lambda v: f"{v:.2f}",     Float64Stamped),
     ("battery/temperature",      "temperature", "°C", WARN,   lambda v: f"{v:.2f}",     Temperature),
-    ("battery/soh",              "soh",         "%",  ORANGE, lambda v: f"{v*100:.2f}", Float64Stamped),
+    ("battery/soh",              "soh",         "%",  ORANGE, lambda v: f"{v:.2f}",     Float64Stamped),
     ("battery/energy_consumed",  "energy",      "Wh", TEXT,   lambda v: f"{v:.2f}",     Float64Stamped),
-    ("battery/max_load_power",   "max_load",    "W",  MUTED,  lambda v: f"{v:.0f}",     Float64Stamped),
-    ("battery/max_charge_power", "max_charge",  "W",  MUTED,  lambda v: f"{v:.0f}",     Float64Stamped),
+    ("battery/max_load_power",   "max_load",    "kW", MUTED,  lambda v: f"{v:.2f}",     Float64Stamped),
+    ("battery/max_charge_power", "max_charge",  "kW", MUTED,  lambda v: f"{v:.2f}",     Float64Stamped),
 ]
 
 # (label, key, unit, color, lo, hi, scale) — scale converts raw value to shown value
 GAUGES = [
-    ("SOC",     "soc",         "%",  GOOD,   0,   100, 100.0),
+    ("SOC",     "soc",         "%",  GOOD,   0,   100, 1.0),
     ("VOLTAGE", "voltage",     "V",  ACCENT, 300, 430, 1.0),
     ("TEMP",    "temperature", "°C", WARN,   15,  55,  1.0),
-    ("SOH",     "soh",         "%",  ORANGE, 0,   100, 100.0),
+    ("SOH",     "soh",         "%",  ORANGE, 0,   100, 1.0),
 ]
 
 
@@ -211,7 +211,7 @@ class BatteryViewer:
         # Threshold colours
         if "soc" in d:
             s = d["soc"]
-            self.gauges["soc"]["color"] = GOOD if s > 0.3 else (WARN if s > 0.15 else BAD)
+            self.gauges["soc"]["color"] = GOOD if s > 30 else (WARN if s > 15 else BAD)
         if "temperature" in d:
             t = d["temperature"]
             self.gauges["temperature"]["color"] = GOOD if t < 35 else (WARN if t < 45 else BAD)
