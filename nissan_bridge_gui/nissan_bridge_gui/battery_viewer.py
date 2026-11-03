@@ -7,6 +7,7 @@ Subscribes to all battery/* topics (relative, so a namespace can be applied) and
 Usage:
     ros2 run nissan_bridge_gui battery_viewer
     ros2 run nissan_bridge_gui battery_viewer --ros-args -r __ns:=/nissan9
+    ros2 launch nissan_bridge_gui battery_viewer.launch.py            # namespace:=nissan9 by default
 
 vide coded, don't take as a reference for how to write a GUI    
 """
