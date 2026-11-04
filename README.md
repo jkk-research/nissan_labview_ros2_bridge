@@ -87,3 +87,7 @@ ros2 topic pub -r 10 /nissan9/battery/temperature sensor_msgs/msg/Temperature "{
 | `vehicle/ambient_temperature` | `sensor_msgs/Temperature` | °C | CAR 0x510 `OutsideAmbientTemperature` |
 
 The raw per-cluster topics (`ev/battery_power`, `ev/thermal`, `ev/battery_history`, `vehicle/state`) are still published.
+
+# Image
+
+![Battery Viewer GUI](nissan_bridge_gui/img/battery_viewer.png)
