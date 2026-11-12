@@ -1,0 +1,22 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>nissan_speed_control</name>
+  <version>0.0.0</version>
+  <description>Longitudinal (speed) PID control for the Nissan: cmd_vel to accel/brake commands.</description>
+  <maintainer email="devnull@example.com">nissan_bridge team</maintainer>
+  <license>BSD-3-Clause</license>
+
+  <buildtool_depend>ament_cmake</buildtool_depend>
+
+  <depend>rclcpp</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+  <depend>nissan_bridge_msgs</depend>
+
+  <exec_depend>launch</exec_depend>
+  <exec_depend>launch_ros</exec_depend>
+
+  <export>
+    <build_type>ament_cmake</build_type>
+  </export>
+</package>

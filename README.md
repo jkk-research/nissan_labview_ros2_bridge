@@ -24,7 +24,7 @@ Build all packages:
 cd ~/ros2_ws
 ```
 ```bash
-colcon build --packages-select nissan_bridge_msgs nissan_bridge nissan_bridge_gui --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
+colcon build --packages-select nissan_bridge_msgs nissan_bridge nissan_bridge_gui nissan_speed_control --symlink-install --cmake-args -DCMAKE_BUILD_TYPE=Release
 ```
 
 Source the workspace after building:
@@ -38,6 +38,7 @@ source ~/ros2_ws/install/setup.bash
 - `nissan_bridge_msgs`: ROS 2 message definitions for the bridge
 - `nissan_bridge`: C++ bridge node
 - `nissan_bridge_gui`: Python test GUI node
+- `nissan_speed_control`: longitudinal PID control, `cmd_vel` → `control/accel_cmd`, `control/brake_cmd`
 
 
 ## Usage
@@ -64,7 +65,7 @@ Manual command publisher (sliders for `cmd_vel`, accel/brake, control state butt
 ros2 launch nissan_bridge_gui car_tester.launch.py
 ```
 
-Slider ranges are parameters: `speed_limit` (0–10 m/s), `steer_limit` (±1 rad/s), `pedal_max` (100).
+Slider ranges are parameters: `speed_limit` (0–10 m/s), `steer_limit` (±1 rad/s), `pedal_max` (1).
 
 ```bash
 ros2 topic type /nissan9/battery/voltage
@@ -91,7 +92,7 @@ ros2 topic pub -r 10 /nissan9/battery/temperature sensor_msgs/msg/Temperature "{
 | `battery/max_load_power` | `Float64Stamped` | kW | EV 0x1DC `LB_Discharge_Power_Limit` |
 | `battery/max_charge_power` | `Float64Stamped` | kW | EV 0x1DC `LB_Charge_Power_Limit` |
 | `ev/powertrain/p_mech` | `Float64Stamped` | W | V·I × `battery_current_sign` (battery terminal power, + = discharge) |
-| `vehicle_status` | `geometry_msgs/TwistStamped` | km/h, CAN units | `linear.x`: CAR 0x284 `VehicleSpeedFromABS`, `angular.z`: CAR 0x002 `SteeringAngle` |
+| `vehicle_status` | `geometry_msgs/TwistStamped` | m/s, CAN units | `linear.x`: CAR 0x284 `VehicleSpeedFromABS`, `angular.z`: CAR 0x002 `SteeringAngle` |
 | `vehicle/ambient_temperature` | `sensor_msgs/Temperature` | °C | CAR 0x510 `OutsideAmbientTemperature` |
 
 The raw per-cluster topics (`ev/battery_power`, `ev/thermal`, `ev/battery_history`, `vehicle/state`) are still published.
@@ -106,8 +107,8 @@ The node sends 8 big-endian floats to `crio_ip:crio_cmd_port` (defaults: `source
 | 1 | Timestamp (s since node start) | – | – |
 | 2 | vehicle_speed_ref_cmd | `cmd_vel` `linear.x` | `geometry_msgs/Twist` |
 | 3 | vehicle_steering_cmd | `cmd_vel` `angular.z` | `geometry_msgs/Twist` |
-| 4 | accel_cmd | `control/accel_cmd` | `Float64Stamped` |
-| 5 | brake_cmd | `control/brake_cmd` | `Float64Stamped` |
+| 4 | accel_cmd | `control/accel_cmd` | `Float64Stamped` (0–1) |
+| 5 | brake_cmd | `control/brake_cmd` | `Float64Stamped` (0–1) |
 | 6 | control_state_cmd | `control/control_state_cmd` | `std_msgs/Int32` (1 Manual, 2 Autonomous_speed_ref, 3 Autonomous_pedal_ref, 4 Error, 5 Testing) |
 | 7 | buzzer | `control/buzzer_cmd` | `std_msgs/Bool` (0.0 / 1.0) |
 
@@ -117,6 +118,23 @@ Last received values are sent; initial values are 0 and control state 1 (Manual)
 ros2 topic pub -r 50 /nissan9/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 3.5}, angular: {z: -0.2}}"
 ros2 topic pub -1 /nissan9/control/control_state_cmd std_msgs/msg/Int32 "{data: 2}"
 ```
+
+## Speed control (`nissan_speed_control`)
+
+```bash
+ros2 launch nissan_speed_control speed_control.launch.py
+```
+
+| Direction | Topic | Type | Note |
+|---|---|---|---|
+| in | `cmd_vel` | `geometry_msgs/Twist` | `linear.x` reference, m/s (last value is kept; the `CMD_TIMEOUT` fallback to 0 is commented out in the source) |
+| in | `vehicle_status` | `geometry_msgs/TwistStamped` | `linear.x` feedback from the bridge, m/s |
+| in | `control_reinit` | `std_msgs/Bool` | `true` resets integrators and rate limiters |
+| out | `control/accel_cmd` | `Float64Stamped` | 0–1 (`max_accel`) |
+| out | `control/brake_cmd` | `Float64Stamped` | 0–1 (`max_brake`); `standstill_brake` (0.3) holds at standstill |
+| out | `control_status` | `std_msgs/String` | `accel`, `brake`, `standstill5`, `standstill1` |
+
+Ported from the Lexus `speed_control` node (same default gains, hysteresis, rate limits). Steering is not handled here: the bridge forwards `cmd_vel` `angular.z` to the cRIO directly. Link: [github.com/jkk-research/lexus_bringup/blob/main/src/speed_control.cpp](https://github.com/jkk-research/lexus_bringup/blob/main/src/speed_control.cpp)
 
 # Image
 

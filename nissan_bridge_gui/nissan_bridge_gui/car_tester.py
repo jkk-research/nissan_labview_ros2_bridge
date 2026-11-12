@@ -67,7 +67,7 @@ class CarTesterNode(Node):
         super().__init__("car_tester_gui")
         self.speed_limit = self.declare_parameter("speed_limit", 10.0).value      # m/s, 0..limit
         self.steer_limit = self.declare_parameter("steer_limit", 1.0).value       # rad/s, ±
-        self.pedal_max = self.declare_parameter("pedal_max", 100.0).value         # accel/brake
+        self.pedal_max = self.declare_parameter("pedal_max", 1.0).value           # accel/brake
         self.frame_id = self.declare_parameter("frame_id", "base_link").value
 
         self.pub = {}
