@@ -1,4 +1,5 @@
 // Receives flattened LabVIEW UDP clusters and publishes their ROS 2 messages.
+// Sends the control command cluster (ID 5) back to the cRIO at a fixed rate.
 
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -15,12 +16,14 @@
 #include <cstring>
 #include <iomanip>
 #include <limits>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
 #include <thread>
 #include <vector>
 
+#include "geometry_msgs/msg/twist.hpp"
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "nissan_bridge_msgs/msg/ev_battery_history.hpp"
 #include "nissan_bridge_msgs/msg/ev_battery_power.hpp"
@@ -29,6 +32,8 @@
 #include "nissan_bridge_msgs/msg/vehicle_state.hpp"
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/temperature.hpp"
+#include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/int32.hpp"
 
 namespace
 {
@@ -38,6 +43,13 @@ constexpr int64_t kNanosecondsPerSecond = 1000000000LL;
 constexpr double kSecondsPerHour = 3600.0;
 // Longer gaps between cluster 1 packets are not integrated into battery/energy_consumed
 constexpr double kMaxEnergyIntegrationGapSec = 1.0;
+
+// Outgoing control cluster: ID, Timestamp, vehicle_speed_ref_cmd, vehicle_steering_cmd,
+// accel_cmd, brake_cmd, control_state_cmd, buzzer
+constexpr float kControlClusterId = 5.0F;
+constexpr std::size_t kControlClusterValueCount = 8;
+constexpr int kControlStateMin = 1;   // [1] Manual
+constexpr int kControlStateMax = 5;   // [5] Testing
 
 float bytesToFloat(const uint8_t * bytes, bool big_endian_source)
 {
@@ -49,6 +61,16 @@ float bytesToFloat(const uint8_t * bytes, bool big_endian_source)
   float value;
   std::memcpy(&value, &raw, sizeof(value));
   return value;
+}
+
+void floatToBytes(float value, uint8_t * bytes, bool big_endian_target)
+{
+  uint32_t raw;
+  std::memcpy(&raw, &value, sizeof(raw));
+  if (big_endian_target) {
+    raw = __builtin_bswap32(raw);
+  }
+  std::memcpy(bytes, &raw, sizeof(raw));
 }
 
 bool toByte(float value, uint8_t & result)
@@ -90,6 +112,14 @@ public:
               battery_temperature_source_ + "\"");
     }
     frame_id_ = declare_parameter<std::string>("frame_id", "base_link");
+    crio_ip_ = declare_parameter<std::string>("crio_ip", source_ip_);
+    crio_cmd_port_ = declare_parameter<int>("crio_cmd_port", 63334);
+    const double control_rate_hz = declare_parameter<double>("control_rate_hz", 100.0);
+    // Only a warning: the last received command values are still sent
+    cmd_timeout_sec_ = declare_parameter<double>("cmd_timeout_sec", 0.5);
+    if (!(control_rate_hz > 0.0)) {
+      throw std::runtime_error("control_rate_hz must be positive");
+    }
 
     battery_power_publisher_ = create_publisher<nissan_bridge_msgs::msg::EvBatteryPower>(
       "ev/battery_power", 10);
@@ -114,6 +144,55 @@ public:
       "vehicle_status", 10);
     ambient_temperature_publisher_ = create_publisher<sensor_msgs::msg::Temperature>(
       "vehicle/ambient_temperature", 10);
+
+    cmd_vel_subscription_ = create_subscription<geometry_msgs::msg::Twist>(
+      "cmd_vel", 10, [this](const geometry_msgs::msg::Twist::SharedPtr msg) {
+        speed_ref_cmd_ = static_cast<float>(msg->linear.x);
+        steering_cmd_ = static_cast<float>(msg->angular.z);
+        last_cmd_vel_time_ = std::chrono::steady_clock::now();
+      });
+    accel_cmd_subscription_ = create_subscription<Float64Stamped>(
+      "control/accel_cmd", 10, [this](const Float64Stamped::SharedPtr msg) {
+        accel_cmd_ = static_cast<float>(msg->data);
+      });
+    brake_cmd_subscription_ = create_subscription<Float64Stamped>(
+      "control/brake_cmd", 10, [this](const Float64Stamped::SharedPtr msg) {
+        brake_cmd_ = static_cast<float>(msg->data);
+      });
+    control_state_cmd_subscription_ = create_subscription<std_msgs::msg::Int32>(
+      "control/control_state_cmd", 10, [this](const std_msgs::msg::Int32::SharedPtr msg) {
+        if (msg->data < kControlStateMin || msg->data > kControlStateMax) {
+          RCLCPP_WARN(
+            get_logger(), "Ignoring control_state_cmd %d (expected %d-%d)",
+            msg->data, kControlStateMin, kControlStateMax);
+          return;
+        }
+        control_state_cmd_ = static_cast<float>(msg->data);
+      });
+    buzzer_cmd_subscription_ = create_subscription<std_msgs::msg::Bool>(
+      "control/buzzer_cmd", 10, [this](const std_msgs::msg::Bool::SharedPtr msg) {
+        buzzer_cmd_ = msg->data ? 1.0F : 0.0F;
+      });
+
+    send_socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+    if (send_socket_fd_ < 0) {
+      throw std::runtime_error(
+              std::string("Failed to create UDP send socket: ") + std::strerror(errno));
+    }
+    crio_address_.sin_family = AF_INET;
+    crio_address_.sin_port = htons(static_cast<uint16_t>(crio_cmd_port_));
+    if (inet_pton(AF_INET, crio_ip_.c_str(), &crio_address_.sin_addr) != 1) {
+      close(send_socket_fd_);
+      send_socket_fd_ = -1;
+      throw std::runtime_error("Invalid crio_ip \"" + crio_ip_ + "\"");
+    }
+    start_time_ = std::chrono::steady_clock::now();
+    control_timer_ = create_wall_timer(
+      std::chrono::duration<double>(1.0 / control_rate_hz),
+      std::bind(&NissanBridgeNode::sendControlCluster, this));
+    RCLCPP_INFO(
+      get_logger(), "Sending control cluster (ID 5) to %s:%d at %.1f Hz",
+      crio_ip_.c_str(), crio_cmd_port_, control_rate_hz);
 
     socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (socket_fd_ < 0) {
@@ -157,6 +236,9 @@ public:
     }
     if (socket_fd_ >= 0) {
       close(socket_fd_);
+    }
+    if (send_socket_fd_ >= 0) {
+      close(send_socket_fd_);
     }
   }
 
@@ -258,6 +340,38 @@ private:
         default:
           break;
       }
+    }
+  }
+
+  void sendControlCluster()
+  {
+    const auto steady_now = std::chrono::steady_clock::now();
+    // Seconds since node start (float precision stays below 10 ms for ~1 day of uptime)
+    const float timestamp = std::chrono::duration<float>(steady_now - start_time_).count();
+
+    const bool cmd_vel_stale = !last_cmd_vel_time_ ||
+      std::chrono::duration<double>(steady_now - *last_cmd_vel_time_).count() > cmd_timeout_sec_;
+    if (cmd_vel_stale && control_state_cmd_ != static_cast<float>(kControlStateMin)) {
+      RCLCPP_WARN_THROTTLE(
+        get_logger(), *get_clock(), 1000,
+        "cmd_vel not received for more than %.3f sec while control_state_cmd is %.0f",
+        cmd_timeout_sec_, control_state_cmd_);
+    }
+
+    const std::array<float, kControlClusterValueCount> values{
+      kControlClusterId, timestamp, speed_ref_cmd_, steering_cmd_,
+      accel_cmd_, brake_cmd_, control_state_cmd_, buzzer_cmd_};
+    std::array<uint8_t, kControlClusterValueCount * kValueBytes> buffer{};
+    for (std::size_t index = 0; index < values.size(); ++index) {
+      floatToBytes(values[index], buffer.data() + index * kValueBytes, big_endian_source_);
+    }
+
+    const ssize_t sent = sendto(
+      send_socket_fd_, buffer.data(), buffer.size(), 0,
+      reinterpret_cast<const sockaddr *>(&crio_address_), sizeof(crio_address_));
+    if (sent < 0) {
+      RCLCPP_ERROR_THROTTLE(
+        get_logger(), *get_clock(), 1000, "sendto() failed: %s", std::strerror(errno));
     }
   }
 
@@ -459,6 +573,25 @@ private:
   double battery_current_sign_{-1.0};
   std::string battery_temperature_source_{"pack"};
   std::string frame_id_{"base_link"};
+  std::string crio_ip_;
+  int crio_cmd_port_{63334};
+  double cmd_timeout_sec_{0.5};
+  int send_socket_fd_{-1};
+  sockaddr_in crio_address_{};
+  std::chrono::steady_clock::time_point start_time_;
+  std::optional<std::chrono::steady_clock::time_point> last_cmd_vel_time_;
+  float speed_ref_cmd_{0.0F};
+  float steering_cmd_{0.0F};
+  float accel_cmd_{0.0F};
+  float brake_cmd_{0.0F};
+  float control_state_cmd_{static_cast<float>(kControlStateMin)};
+  float buzzer_cmd_{0.0F};
+  rclcpp::TimerBase::SharedPtr control_timer_;
+  rclcpp::Subscription<geometry_msgs::msg::Twist>::SharedPtr cmd_vel_subscription_;
+  rclcpp::Subscription<Float64Stamped>::SharedPtr accel_cmd_subscription_;
+  rclcpp::Subscription<Float64Stamped>::SharedPtr brake_cmd_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Int32>::SharedPtr control_state_cmd_subscription_;
+  rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr buzzer_cmd_subscription_;
   bool energy_integration_started_{false};
   double energy_consumed_wh_{0.0};
   double last_power_w_{0.0};

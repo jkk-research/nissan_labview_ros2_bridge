@@ -24,6 +24,7 @@ setup(
         'console_scripts': [
             'nissan_bridge_gui = nissan_bridge_gui.gui_node:main',
             'battery_viewer = nissan_bridge_gui.battery_viewer:main',
+            'car_tester = nissan_bridge_gui.car_tester:main',
         ],
     },
 )

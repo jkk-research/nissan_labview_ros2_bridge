@@ -58,6 +58,14 @@ ros2 launch nissan_bridge nissan_bridge.launch.py namespace:=nissan9 frame_id:=n
 ros2 run nissan_bridge_gui battery_viewer --ros-args -r __ns:=/nissan9
 ```
 
+Manual command publisher (sliders for `cmd_vel`, accel/brake, control state buttons, hold-to-buzz button) for the cRIO control cluster:
+
+```bash
+ros2 launch nissan_bridge_gui car_tester.launch.py
+```
+
+Slider ranges are parameters: `speed_limit` (0–10 m/s), `steer_limit` (±1 rad/s), `pedal_max` (100).
+
 ```bash
 ros2 topic type /nissan9/battery/voltage
 ```
@@ -87,6 +95,28 @@ ros2 topic pub -r 10 /nissan9/battery/temperature sensor_msgs/msg/Temperature "{
 | `vehicle/ambient_temperature` | `sensor_msgs/Temperature` | °C | CAR 0x510 `OutsideAmbientTemperature` |
 
 The raw per-cluster topics (`ev/battery_power`, `ev/thermal`, `ev/battery_history`, `vehicle/state`) are still published.
+
+## Subscribed topics → cRIO control cluster (ID 5, 100 Hz)
+
+The node sends 8 big-endian floats to `crio_ip:crio_cmd_port` (defaults: `source_ip`, `63334`) at `control_rate_hz` (100):
+
+| # | Field | Source topic | Type |
+|---|---|---|---|
+| 0 | ID = 5 | – | – |
+| 1 | Timestamp (s since node start) | – | – |
+| 2 | vehicle_speed_ref_cmd | `cmd_vel` `linear.x` | `geometry_msgs/Twist` |
+| 3 | vehicle_steering_cmd | `cmd_vel` `angular.z` | `geometry_msgs/Twist` |
+| 4 | accel_cmd | `control/accel_cmd` | `Float64Stamped` |
+| 5 | brake_cmd | `control/brake_cmd` | `Float64Stamped` |
+| 6 | control_state_cmd | `control/control_state_cmd` | `std_msgs/Int32` (1 Manual, 2 Autonomous_speed_ref, 3 Autonomous_pedal_ref, 4 Error, 5 Testing) |
+| 7 | buzzer | `control/buzzer_cmd` | `std_msgs/Bool` (0.0 / 1.0) |
+
+Last received values are sent; initial values are 0 and control state 1 (Manual). Out-of-range control states are ignored.
+
+```bash
+ros2 topic pub -r 50 /nissan9/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 3.5}, angular: {z: -0.2}}"
+ros2 topic pub -1 /nissan9/control/control_state_cmd std_msgs/msg/Int32 "{data: 2}"
+```
 
 # Image
 
