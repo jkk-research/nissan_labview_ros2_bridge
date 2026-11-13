@@ -113,7 +113,7 @@ public:
     }
     frame_id_ = declare_parameter<std::string>("frame_id", "base_link");
     crio_ip_ = declare_parameter<std::string>("crio_ip", source_ip_);
-    crio_cmd_port_ = declare_parameter<int>("crio_cmd_port", 63334);
+    crio_cmd_port_ = declare_parameter<int>("crio_cmd_port", 63333);
     const double control_rate_hz = declare_parameter<double>("control_rate_hz", 100.0);
     // Only a warning: the last received command values are still sent
     cmd_timeout_sec_ = declare_parameter<double>("cmd_timeout_sec", 0.5);
@@ -574,7 +574,7 @@ private:
   std::string battery_temperature_source_{"pack"};
   std::string frame_id_{"base_link"};
   std::string crio_ip_;
-  int crio_cmd_port_{63334};
+  int crio_cmd_port_{63333};
   double cmd_timeout_sec_{0.5};
   int send_socket_fd_{-1};
   sockaddr_in crio_address_{};

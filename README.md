@@ -99,7 +99,7 @@ The raw per-cluster topics (`ev/battery_power`, `ev/thermal`, `ev/battery_histor
 
 ## Subscribed topics → cRIO control cluster (ID 5, 100 Hz)
 
-The node sends 8 big-endian floats to `crio_ip:crio_cmd_port` (defaults: `source_ip`, `63334`) at `control_rate_hz` (100):
+The node sends 8 big-endian floats to `crio_ip:crio_cmd_port` (defaults: `source_ip`, `63333`) at `control_rate_hz` (100):
 
 | # | Field | Source topic | Type |
 |---|---|---|---|
