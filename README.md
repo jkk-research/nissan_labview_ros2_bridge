@@ -114,6 +114,12 @@ The node sends 8 big-endian floats to `crio_ip:crio_cmd_port` (defaults: `source
 
 Last received values are sent; initial values are 0 and control state 1 (Manual). Out-of-range control states are ignored.
 
+Sending can be turned off (receive/publish only) with the `send_control` parameter / launch argument:
+
+```bash
+ros2 launch nissan_bridge nissan_bridge.launch.py send_control:=false
+```
+
 ```bash
 ros2 topic pub -r 50 /nissan9/cmd_vel geometry_msgs/msg/Twist "{linear: {x: 3.5}, angular: {z: -0.2}}"
 ros2 topic pub -1 /nissan9/control/control_state_cmd std_msgs/msg/Int32 "{data: 2}"

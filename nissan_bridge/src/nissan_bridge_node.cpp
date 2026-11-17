@@ -112,6 +112,7 @@ public:
               battery_temperature_source_ + "\"");
     }
     frame_id_ = declare_parameter<std::string>("frame_id", "base_link");
+    const bool send_control = declare_parameter<bool>("send_control", true);
     crio_ip_ = declare_parameter<std::string>("crio_ip", source_ip_);
     crio_cmd_port_ = declare_parameter<int>("crio_cmd_port", 63333);
     const double control_rate_hz = declare_parameter<double>("control_rate_hz", 100.0);
@@ -174,25 +175,12 @@ public:
         buzzer_cmd_ = msg->data ? 1.0F : 0.0F;
       });
 
-    send_socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
-    if (send_socket_fd_ < 0) {
-      throw std::runtime_error(
-              std::string("Failed to create UDP send socket: ") + std::strerror(errno));
-    }
-    crio_address_.sin_family = AF_INET;
-    crio_address_.sin_port = htons(static_cast<uint16_t>(crio_cmd_port_));
-    if (inet_pton(AF_INET, crio_ip_.c_str(), &crio_address_.sin_addr) != 1) {
-      close(send_socket_fd_);
-      send_socket_fd_ = -1;
-      throw std::runtime_error("Invalid crio_ip \"" + crio_ip_ + "\"");
-    }
     start_time_ = std::chrono::steady_clock::now();
-    control_timer_ = create_wall_timer(
-      std::chrono::duration<double>(1.0 / control_rate_hz),
-      std::bind(&NissanBridgeNode::sendControlCluster, this));
-    RCLCPP_INFO(
-      get_logger(), "Sending control cluster (ID 5) to %s:%d at %.1f Hz",
-      crio_ip_.c_str(), crio_cmd_port_, control_rate_hz);
+    if (send_control) {
+      setupControlSender(control_rate_hz);
+    } else {
+      RCLCPP_INFO(get_logger(), "Control cluster (ID 5) sending disabled (send_control:=false)");
+    }
 
     socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
     if (socket_fd_ < 0) {
@@ -341,6 +329,28 @@ private:
           break;
       }
     }
+  }
+
+  void setupControlSender(double rate_hz)
+  {
+    send_socket_fd_ = socket(AF_INET, SOCK_DGRAM, 0);
+    if (send_socket_fd_ < 0) {
+      throw std::runtime_error(
+              std::string("Failed to create UDP send socket: ") + std::strerror(errno));
+    }
+    crio_address_.sin_family = AF_INET;
+    crio_address_.sin_port = htons(static_cast<uint16_t>(crio_cmd_port_));
+    if (inet_pton(AF_INET, crio_ip_.c_str(), &crio_address_.sin_addr) != 1) {
+      close(send_socket_fd_);
+      send_socket_fd_ = -1;
+      throw std::runtime_error("Invalid crio_ip \"" + crio_ip_ + "\"");
+    }
+    control_timer_ = create_wall_timer(
+      std::chrono::duration<double>(1.0 / rate_hz),
+      std::bind(&NissanBridgeNode::sendControlCluster, this));
+    RCLCPP_INFO(
+      get_logger(), "Sending control cluster (ID 5) to %s:%d at %.1f Hz",
+      crio_ip_.c_str(), crio_cmd_port_, rate_hz);
   }
 
   void sendControlCluster()
