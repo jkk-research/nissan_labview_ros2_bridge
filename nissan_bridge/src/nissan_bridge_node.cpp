@@ -83,11 +83,53 @@ bool toByte(float value, uint8_t & result)
 }
 
 constexpr double kSecondsPerTick = 1e-7;   // 100 ns
+// The cRIO CAN time stamps are a U32 count of 100 ns ticks: they wrap every ~429.5 s
+constexpr double kTickWrap = 4294967296.0;   // 2^32 ticks
+constexpr double kHalfTickWrap = kTickWrap / 2.0;
 
-double ticksToSec(float ticks)
+// Turns one wrapping CAN tick field into seconds that keep increasing across wraps.
+// A drop of more than half the range is a wrap (or a cRIO counter reset); a jump of more
+// than half the range forward right after a wrap is a late pre-wrap sample.
+class TickUnwrapper
 {
-  return static_cast<double>(ticks) * kSecondsPerTick;
-}
+public:
+  double toSec(float ticks)
+  {
+    const double raw = static_cast<double>(ticks);
+    if (!std::isfinite(raw) || raw < 0.0) {
+      return raw * kSecondsPerTick;
+    }
+    double wraps = static_cast<double>(wrap_count_);
+    if (!has_last_) {
+      has_last_ = true;
+      last_raw_ = raw;
+    } else if (raw < last_raw_ - kHalfTickWrap) {
+      ++wrap_count_;
+      wraps += 1.0;
+      last_raw_ = raw;
+    } else if (raw > last_raw_ + kHalfTickWrap && wrap_count_ > 0) {
+      wraps -= 1.0;   // reordered packet from before the last wrap: state unchanged
+    } else {
+      last_raw_ = raw;
+    }
+    return (wraps * kTickWrap + raw) * kSecondsPerTick;
+  }
+
+private:
+  bool has_last_{false};
+  double last_raw_{0.0};
+  uint64_t wrap_count_{0};
+};
+
+// One unwrapper per CAN tick field of the incoming clusters
+enum TickField : std::size_t
+{
+  kEv1db, kEv1dc,                                                     // cluster 1
+  kEv54a, kEv54c, kEv54f, kEv55a, kEv55b, kEv5bc, kCar510, kCar5b3,   // cluster 2
+  kEv59e, kEv5c0,                                                     // cluster 3
+  kCar284, kCar002, kCar358,                                          // cluster 4
+  kTickFieldCount
+};
 }  // namespace
 
 class NissanBridgeNode : public rclcpp::Node
@@ -425,11 +467,11 @@ private:
     nissan_bridge_msgs::msg::EvBatteryPower message;
     message.header.stamp = now();
     message.header.frame_id = frame_id_;
-    message.ev_1db_timestamp = ticksToSec(values[1]);
+    message.ev_1db_timestamp = ticksToSec(kEv1db, values[1]);
     message.ev_1db_lb_voltage = values[2];
     message.ev_1db_lb_current = values[3];
     message.ev_1db_lb_usable_soc = values[4];
-    message.ev_1dc_timestamp = ticksToSec(values[5]);
+    message.ev_1dc_timestamp = ticksToSec(kEv1dc, values[5]);
     message.ev_1dc_lb_charge_power_limit = values[6];
     message.ev_1dc_lb_discharge_power_limit = values[7];
     battery_power_publisher_->publish(message);
@@ -463,26 +505,26 @@ private:
     nissan_bridge_msgs::msg::EvThermal message;
     message.header.stamp = now();
     message.header.frame_id = frame_id_;
-    message.ev_54a_timestamp = ticksToSec(values[1]);
+    message.ev_54a_timestamp = ticksToSec(kEv54a, values[1]);
     message.ev_54a_ambient_temp_ac = values[2];
-    message.ev_54c_timestamp = ticksToSec(values[3]);
+    message.ev_54c_timestamp = ticksToSec(kEv54c, values[3]);
     message.ev_54c_ac_evaporator_temperature = values[4];
-    message.ev_54f_timestamp = ticksToSec(values[5]);
+    message.ev_54f_timestamp = ticksToSec(kEv54f, values[5]);
     message.ev_54f_interior_intake_temp = values[6];
-    message.ev_55a_timestamp = ticksToSec(values[7]);
+    message.ev_55a_timestamp = ticksToSec(kEv55a, values[7]);
     message.ev_55a_motor_temperature = values[8];
     message.ev_55a_igbt_temperature = values[9];
     message.ev_55a_igbt_driver_board_temperature = values[10];
     message.ev_55a_inverter_com_board_temp = values[11];
-    message.ev_55b_timestamp = ticksToSec(values[12]);
+    message.ev_55b_timestamp = ticksToSec(kEv55b, values[12]);
     message.ev_55b_lb_soc = values[13];
-    message.ev_5bc_timestamp = ticksToSec(values[14]);
+    message.ev_5bc_timestamp = ticksToSec(kEv5bc, values[14]);
     message.ev_5bc_lb_capacity_deterioration_rate = values[15];
     message.ev_5bc_lb_remain_capacity_gids = values[16];
     message.ev_5bc_lb_temperature_segment_for_dash = values[17];
-    message.car_510_timestamp = ticksToSec(values[18]);
+    message.car_510_timestamp = ticksToSec(kCar510, values[18]);
     message.car_510_outside_ambient_temperature = values[19];
-    message.car_5b3_timestamp = ticksToSec(values[20]);
+    message.car_5b3_timestamp = ticksToSec(kCar5b3, values[20]);
     message.car_5b3_battery_state_of_health = values[21];
     message.car_5b3_battery_gids = values[22];
     message.car_5b3_battery_pack_temperature = values[23];
@@ -501,9 +543,9 @@ private:
     nissan_bridge_msgs::msg::EvBatteryHistory message;
     message.header.stamp = now();
     message.header.frame_id = frame_id_;
-    message.ev_59e_timestamp = ticksToSec(values[1]);
+    message.ev_59e_timestamp = ticksToSec(kEv59e, values[1]);
     message.ev_59e_lb_full_capacity_for_qc = values[2];
-    message.ev_5c0_timestamp = ticksToSec(values[3]);
+    message.ev_5c0_timestamp = ticksToSec(kEv5c0, values[3]);
     message.ev_5c0_degr_int_res_coeff_min = values[4];
     message.ev_5c0_degr_int_res_coeff_max = values[5];
     message.ev_5c0_degr_int_res_coeff_avg = values[6];
@@ -530,9 +572,9 @@ private:
     message.header.frame_id = frame_id_;
     message.rt_time = values[1];    // not CAN ticks
     message.aut_time = values[2];   // not CAN ticks
-    message.car_284_timestamp = ticksToSec(values[3]);
+    message.car_284_timestamp = ticksToSec(kCar284, values[3]);
     message.car_284_vehicle_speed_from_abs = values[4];
-    message.car_002_timestamp = ticksToSec(values[5]);
+    message.car_002_timestamp = ticksToSec(kCar002, values[5]);
     message.car_002_steering_angle = values[6];
     message.accel_pedal_state = values[7];
     message.brake_pedal_state = values[8];
@@ -542,7 +584,7 @@ private:
       RCLCPP_WARN(get_logger(), "Ignoring vehicle state packet with invalid byte field");
       return;
     }
-    message.car_358_timestamp = ticksToSec(values[10]);
+    message.car_358_timestamp = ticksToSec(kCar358, values[10]);
     vehicle_state_publisher_->publish(message);
 
     geometry_msgs::msg::TwistStamped status;
@@ -551,6 +593,11 @@ private:
     status.twist.linear.x = values[4];
     status.twist.angular.z = values[6];
     vehicle_status_publisher_->publish(status);
+  }
+
+  double ticksToSec(TickField field, float ticks)
+  {
+    return tick_unwrappers_[field].toSec(ticks);
   }
 
   void publishFloat(
@@ -609,6 +656,7 @@ private:
   int socket_fd_{-1};
   std::atomic<bool> running_{false};
   std::thread receive_thread_;
+  std::array<TickUnwrapper, kTickFieldCount> tick_unwrappers_{};
   bool time_baseline_set_{false};
   int64_t first_rt_time_ns_{0};
   int64_t first_ros_time_ns_{0};

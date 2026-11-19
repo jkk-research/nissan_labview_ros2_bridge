@@ -97,6 +97,8 @@ ros2 topic pub -r 10 /nissan9/battery/temperature sensor_msgs/msg/Temperature "{
 
 The raw per-cluster topics (`ev/battery_power`, `ev/thermal`, `ev/battery_history`, `vehicle/state`) are still published.
 
+The `*_timestamp` fields of these raw messages are the cRIO CAN time stamps in seconds (100 ns ticks × 1e-7). The tick counter is 32 bit and wraps every ~429.5 s; the bridge unwraps each field (adds 2³² × 100 ns per wrap), so the published values keep increasing across wraps (wraps are counted from node start; a cRIO counter reset is also counted as one).
+
 ## Subscribed topics → cRIO control cluster (ID 5, 100 Hz)
 
 The node sends 8 big-endian floats to `crio_ip:crio_cmd_port` (defaults: `source_ip`, `63333`) at `control_rate_hz` (100):
