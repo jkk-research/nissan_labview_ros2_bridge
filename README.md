@@ -89,10 +89,12 @@ ros2 topic pub -r 10 /nissan9/battery/temperature sensor_msgs/msg/Temperature "{
 | `battery/temperature` | `sensor_msgs/Temperature` | °C | CAR 0x5B3 `BatteryPackTemperature` or EV 0x5C0 `HistData_Temperature_AVG` (`battery_temperature_source`) |
 | `battery/soh` | `Float64Stamped` | % | CAR 0x5B3 `BatteryStateOfHealth` |
 | `battery/energy_consumed` | `Float64Stamped` | Wh | ∫V·I dt since node start (I × `battery_current_sign`, + = discharge) |
-| `battery/max_load_power` | `Float64Stamped` | kW | EV 0x1DC `LB_Discharge_Power_Limit` |
-| `battery/max_charge_power` | `Float64Stamped` | kW | EV 0x1DC `LB_Charge_Power_Limit` |
+| `battery/max_load_power` | `Float64Stamped` | W | EV 0x1DC `LB_Discharge_Power_Limit` |
+| `battery/max_charge_power` | `Float64Stamped` | W | EV 0x1DC `LB_Charge_Power_Limit` |
 | `ev/powertrain/p_mech` | `Float64Stamped` | W | V·I × `battery_current_sign` (battery terminal power, + = discharge) |
-| `vehicle_status` | `geometry_msgs/TwistStamped` | m/s, CAN units | `linear.x`: CAR 0x284 `VehicleSpeedFromABS`, `angular.z`: CAR 0x002 `SteeringAngle` |
+| `vehicle_status` | `geometry_msgs/TwistStamped` | m/s, rad/s | `linear.x`: CAR 0x284 `VehicleSpeedFromABS`, `angular.z`: yaw rate = v·tan(δ / `steering_ratio`) / `wheelbase` |
+| `vehicle_steering_tire_angle` | `std_msgs/Float64` | rad | road wheel angle = CAR 0x002 `SteeringAngle` / `steering_ratio` |
+| `vehicle_speed_kmph` | `std_msgs/Float64` | km/h | CAR 0x284 `VehicleSpeedFromABS` × 3.6 |
 | `vehicle/ambient_temperature` | `sensor_msgs/Temperature` | °C | CAR 0x510 `OutsideAmbientTemperature` |
 
 The raw per-cluster topics (`ev/battery_power`, `ev/thermal`, `ev/battery_history`, `vehicle/state`) are still published.

@@ -33,6 +33,7 @@
 #include "rclcpp/rclcpp.hpp"
 #include "sensor_msgs/msg/temperature.hpp"
 #include "std_msgs/msg/bool.hpp"
+#include "std_msgs/msg/float64.hpp"
 #include "std_msgs/msg/int32.hpp"
 
 namespace
@@ -160,6 +161,11 @@ public:
     const double control_rate_hz = declare_parameter<double>("control_rate_hz", 100.0);
     // Only a warning: the last received command values are still sent
     cmd_timeout_sec_ = declare_parameter<double>("cmd_timeout_sec", 0.5);
+    wheelbase_ = declare_parameter<double>("wheelbase", 2.7);
+    steering_ratio_ = declare_parameter<double>("steering_ratio", 1.0);
+    if (!(wheelbase_ > 0.0) || !(steering_ratio_ > 0.0)) {
+      throw std::runtime_error("wheelbase and steering_ratio must be positive");
+    }
     if (!(control_rate_hz > 0.0)) {
       throw std::runtime_error("control_rate_hz must be positive");
     }
@@ -185,6 +191,10 @@ public:
     p_mech_publisher_ = create_publisher<Float64Stamped>("ev/powertrain/p_mech", 10);
     vehicle_status_publisher_ = create_publisher<geometry_msgs::msg::TwistStamped>(
       "vehicle_status", 10);
+    vehicle_steering_tire_angle_publisher_ = create_publisher<std_msgs::msg::Float64>(
+      "vehicle_steering_tire_angle", 10);
+    vehicle_speed_kmph_publisher_ = create_publisher<std_msgs::msg::Float64>(
+      "vehicle_speed_kmph", 10);
     ambient_temperature_publisher_ = create_publisher<sensor_msgs::msg::Temperature>(
       "vehicle/ambient_temperature", 10);
 
@@ -587,12 +597,25 @@ private:
     message.car_358_timestamp = ticksToSec(kCar358, values[10]);
     vehicle_state_publisher_->publish(message);
 
+    vehicle_speed_mps_ = values[4];
+    steering_wheel_angle_ = values[6];  // rad, steering wheel
+
+    // Kinematic bicycle model: yaw rate from speed and road wheel angle
+    const double delta = steering_wheel_angle_ / steering_ratio_;
     geometry_msgs::msg::TwistStamped status;
     status.header.stamp = message.header.stamp;
     status.header.frame_id = frame_id_;
-    status.twist.linear.x = values[4];
-    status.twist.angular.z = values[6];
+    status.twist.linear.x = vehicle_speed_mps_;
+    status.twist.angular.z = vehicle_speed_mps_ * std::tan(delta) / wheelbase_;
     vehicle_status_publisher_->publish(status);
+
+    std_msgs::msg::Float64 tire_angle;
+    tire_angle.data = delta;
+    vehicle_steering_tire_angle_publisher_->publish(tire_angle);
+
+    std_msgs::msg::Float64 speed_kmph;
+    speed_kmph.data = vehicle_speed_mps_ * 3.6;
+    vehicle_speed_kmph_publisher_->publish(speed_kmph);
   }
 
   double ticksToSec(TickField field, float ticks)
@@ -633,6 +656,10 @@ private:
   std::string crio_ip_;
   int crio_cmd_port_{63333};
   double cmd_timeout_sec_{0.5};
+  double wheelbase_{2.7};
+  double steering_ratio_{1.0};
+  double steering_wheel_angle_{0.0};
+  double vehicle_speed_mps_{0.0};
   int send_socket_fd_{-1};
   sockaddr_in crio_address_{};
   std::chrono::steady_clock::time_point start_time_;
@@ -675,6 +702,8 @@ private:
   rclcpp::Publisher<Float64Stamped>::SharedPtr max_charge_power_publisher_;
   rclcpp::Publisher<Float64Stamped>::SharedPtr p_mech_publisher_;
   rclcpp::Publisher<geometry_msgs::msg::TwistStamped>::SharedPtr vehicle_status_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr vehicle_steering_tire_angle_publisher_;
+  rclcpp::Publisher<std_msgs::msg::Float64>::SharedPtr vehicle_speed_kmph_publisher_;
   rclcpp::Publisher<sensor_msgs::msg::Temperature>::SharedPtr ambient_temperature_publisher_;
 };
 
