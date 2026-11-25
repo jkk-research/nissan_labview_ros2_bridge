@@ -139,7 +139,7 @@ public:
   NissanBridgeNode()
   : Node("nissan_bridge_node")
   {
-    listen_port_ = declare_parameter<int>("listen_port", 63333);
+    listen_port_ = declare_parameter<int>("listen_port", 63334);
     source_ip_ = declare_parameter<std::string>("source_ip", "192.162.11.22");
     big_endian_source_ = declare_parameter<bool>("big_endian_source", true);
     time_diff_threshold_sec_ = declare_parameter<double>("time_diff_threshold_sec", 0.5);
@@ -645,7 +645,7 @@ private:
     publisher->publish(message);
   }
 
-  int listen_port_{63333};
+  int listen_port_{63334};
   std::string source_ip_{"192.162.11.22"};
   bool big_endian_source_{true};
   double time_diff_threshold_sec_{0.5};
